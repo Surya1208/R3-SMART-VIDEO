@@ -22,7 +22,7 @@ from argparse import ArgumentParser
 import cv2
 import time
 import logging as log
-from openvino.inference_engine import IENetwork, IEPlugin
+from openvino.inference_engine import IENetwork, IECore
 from enum import Enum
 import collections
 
@@ -70,21 +70,22 @@ def main():
     
     # Plugin initialization for specified device and load extensions library if specified
     log.info("Initializing plugin for {} device...".format(args.device))
-    plugin = IEPlugin(device=args.device, plugin_dirs=args.plugin_dir)
+    #plugin = IEPlugin(device=args.device, plugin_dirs=args.plugin_dir)
+    ie=IECore()
     if args.cpu_extension and 'CPU' in args.device:
-        plugin.add_cpu_extension(args.cpu_extension)
+        ie.add_extension(args.cpu_extension,args.device)
 
         
     # Read IR
     log.info("Reading IR...")
     net = IENetwork(model=model_xml, weights=model_bin)
 
-    if plugin.device == "CPU":
-        supported_layers = plugin.get_supported_layers(net)
+    if args.device == "CPU":
+        supported_layers = ie.query_network(net,args.device)
         not_supported_layers = [l for l in net.layers.keys() if l not in supported_layers]
         if len(not_supported_layers) != 0:
             log.error("Following layers are not supported by the plugin for specified device {}:\n {}".
-                      format(plugin.device, ', '.join(not_supported_layers)))
+                      format(args.device, ', '.join(not_supported_layers)))
             log.error("Please try to specify cpu extensions library path in demo's command line parameters using -l "
                       "or --cpu_extension command line argument")
             sys.exit(1)
@@ -98,7 +99,7 @@ def main():
     input_blob = next(iter(net.inputs))
     out_blob = next(iter(net.outputs))
     log.info("Loading IR to the plugin...")
-    exec_net = plugin.load(network=net, num_requests=2)
+    exec_net = ie.load_network(network=net, num_requests=2,device_name=args.device)
        
     # Read and pre-process input image
     n, c, h, w = net.inputs[input_blob].shape
@@ -229,7 +230,7 @@ def main():
     print("Postprocess: {:.2f} ms/frame".format(postprocesstime/(len(postprocess_times)*batchSize)))
 
     del exec_net
-    del plugin
+    del ie
 
 
 if __name__ == '__main__':

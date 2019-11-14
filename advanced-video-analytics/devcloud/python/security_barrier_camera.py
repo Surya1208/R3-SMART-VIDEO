@@ -23,7 +23,7 @@ import cv2
 import numpy as np
 import time
 import logging as log
-from  openvino.inference_engine import IENetwork, IEPlugin
+from  openvino.inference_engine import IENetwork, IECore
 
 
 def build_argparser():
@@ -79,21 +79,22 @@ def load_model(feature,model_xml,device,plugin_dirs,input_key_length,output_key_
     model_bin = os.path.splitext(model_xml)[0] + ".bin"
 
     log.info("Initializing plugin for {} device...".format(device))
-    plugin = IEPlugin(device, plugin_dirs)
+    #plugin = IEPlugin(device, plugin_dirs)
+    ie=IECore()
     log.info("Loading network files for {}".format(feature))
     if cpu_extension and 'CPU' in device:
-        plugin.add_cpu_extension(cpu_extension)
+        ie.add_extension(cpu_extension,device)
     else:
-        plugin.set_config({"PERF_COUNT":"YES"})
+        ie.set_config({"PERF_COUNT":"YES"},device)
 
     net = IENetwork(model=model_xml, weights=model_bin)
 
-    if plugin.device == "CPU":
-        supported_layers = plugin.get_supported_layers(net)
+    if device == "CPU":
+        supported_layers = ie.query_network(net,device)
         not_supported_layers = [l for l in net.layers.keys() if l not in supported_layers]
         if len(not_supported_layers) != 0:
             log.error("Following layers are not supported by the plugin for specified device {}:\n {}".
-                      format(plugin.device, ', '.join(not_supported_layers)))
+                      format(device, ', '.join(not_supported_layers)))
             log.error("Please try to specify cpu extensions library path in demo's command line parameters using -l "
                       "or --cpu_extension command line argument")
             sys.exit(1)
@@ -102,7 +103,7 @@ def load_model(feature,model_xml,device,plugin_dirs,input_key_length,output_key_
     assert len(net.inputs.keys()) == input_key_length, "Demo supports only single input topologies"
     log.info("Checking {} network outputs".format(feature))
     assert len(net.outputs) == output_key_length, "Demo supports only single output topologies"
-    return plugin,net
+    return ie,net
 
 
 def main():
@@ -113,30 +114,30 @@ def main():
    
 
     #Make sure only one IEPlugin was created for one type of device
-    plugin,net = load_model("Vehicle Detection",args.model,args.device,args.plugin_dir,1,1,args.cpu_extension)    
+    ie,net = load_model("Vehicle Detection",args.model,args.device,args.plugin_dir,1,1,args.cpu_extension)    
     
     if args.model and args.model_va:
-        plugin_va,va_net = load_model("Vehicle Attribute Detection",args.model_va,args.device_va,args.plugin_dir,1,2,args.cpu_extension)
+        ie_va,va_net = load_model("Vehicle Attribute Detection",args.model_va,args.device_va,args.plugin_dir,1,2,args.cpu_extension)
         if args.device == args.device_va:
-            plugin_va = plugin
+            ie_va = ie
             if args.model and args.model_lpr:
-                plugin_lpr,lpr_net=load_model("License Plate Recognition",args.model_lpr,args.device_lpr,args.plugin_dir,2,1,args.cpu_extension)
+                ie_lpr,lpr_net=load_model("License Plate Recognition",args.model_lpr,args.device_lpr,args.plugin_dir,2,1,args.cpu_extension)
                 if args.device == args.device_lpr:                    
-                    plugin_lpr = plugin
+                    ie_lpr = ie
 
                     
         elif args.model and args.model_lpr:
-            plugin_lpr,lpr_net=load_model("License Plate Recognition",args.model_lpr,args.device_lpr,args.plugin_dir,2,1,args.cpu_extension)
+            ie_lpr,lpr_net=load_model("License Plate Recognition",args.model_lpr,args.device_lpr,args.plugin_dir,2,1,args.cpu_extension)
             if args.device_va == args.device_lpr:
-                plugin_lpr = plugin_va
+                ie_lpr = ie_va
             elif args.device == args.device_lpr:    
-                plugin_lpr = plugin                    
+                ie_lpr = ie                    
                                         
 
     elif args.model and args.model_lpr:
-        plugin_lpr,lpr_net=load_model("License Plate Recognition",args.model_lpr,args.device_lpr,args.plugin_dir,2,1,args.cpu_extension)
+        ie_lpr,lpr_net=load_model("License Plate Recognition",args.model_lpr,args.device_lpr,args.plugin_dir,2,1,args.cpu_extension)
         if args.device == args.device_lpr:
-            plugin_lpr = plugin
+            ie_lpr = ie
 
             
                 
@@ -146,7 +147,7 @@ def main():
     out_blob = next(iter(net.outputs))
     log.info("Loading IR to the plugin...")
 
-    exec_net = plugin.load(network=net)
+    exec_net = ie.load_network(network=net,device_name=args.device)
     n, c, h, w = net.inputs[input_blob].shape
     del net
     
@@ -155,7 +156,7 @@ def main():
         va_enabled=True
         va_input_blob=next(iter(va_net.inputs))
         va_out_blob=next(iter(va_net.outputs))
-        va_exec_net = plugin_va.load(network=va_net, num_requests=2)
+        va_exec_net = ie_va.load_network(network=va_net, num_requests=2,device_name=args.device_va)
         n_va,c_va,h_va,w_va = va_net.inputs[va_input_blob].shape
         del va_net
         
@@ -169,7 +170,7 @@ def main():
         for i in range(1,maxSequenceSizePerPlate):
             lpr_seqBlob[0].append(1.0)
 
-        lpr_exec_net = plugin_lpr.load(network=lpr_net, num_requests=2)
+        lpr_exec_net = ie_lpr.load_network(network=lpr_net, num_requests=2,device_name=args.device_lpr)
         n_lpr,c_lpr,h_lpr,w_lpr =lpr_net.inputs['data'].shape
         del lpr_net
 
@@ -290,7 +291,7 @@ def main():
     log.info("Execution successful")
               
     del exec_net
-    del plugin
+    del ie
     cv2.destroyAllWindows()
 if __name__ == '__main__':
     sys.exit(main() or 0)

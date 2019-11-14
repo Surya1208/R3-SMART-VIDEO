@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 import logging as log
 from time import time
-from openvino.inference_engine import IENetwork, IEPlugin
+from openvino.inference_engine import IENetwork, IECore
 
 
 def build_argparser():
@@ -51,18 +51,20 @@ def main():
 
 
     # Plugin initialization for specified device and load extensions library if specified
-    plugin = IEPlugin(device=args.device, plugin_dirs=args.plugin_dir)
+    #plugin = IEPlugin(device=args.device, plugin_dirs=args.plugin_dir)
+    ie=IECore()
     #print(dir(IEPlugin))
     if args.cpu_extension and 'CPU' in args.device:
-        plugin.add_cpu_extension(args.cpu_extension)
+        #plugin.add_cpu_extension(args.cpu_extension)
+         ie.add_extension(args.cpu_extension,args.device)
     else:
-        plugin.set_config({"PERF_COUNT":"YES"})
+        ie.set_config({"PERF_COUNT":"YES"} ,"GPU")
     # Read IR
     log.info("Loading network files:\n\t{}\n\t{}".format(model_xml, model_bin))
     net = IENetwork(model=model_xml, weights=model_bin)
 
-    if plugin.device == "CPU":
-        supported_layers = plugin.get_supported_layers(net)
+    if args.device == "CPU":
+        supported_layers = ie.query_network(net,args.device)
         not_supported_layers = [l for l in net.layers.keys() if l not in supported_layers]
         if len(not_supported_layers) != 0:
             log.error("Following layers are not supported by the plugin for specified device {}:\n {}".
@@ -95,7 +97,7 @@ def main():
 
     # Loading model to the plugin
     log.info("Loading model to the plugin")
-    exec_net = plugin.load(network=net,num_requests=2)
+    exec_net = ie.load_network(network=net, num_requests=2,device_name=args.device)
 
     del net
     # Start sync inference
@@ -144,7 +146,7 @@ def main():
 
 
     del exec_net
-    del plugin        
+    del ie       
 
 
 if __name__ == '__main__':

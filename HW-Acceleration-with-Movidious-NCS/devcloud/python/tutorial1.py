@@ -1,13 +1,10 @@
 #!/usr/bin/env python
 """
  Copyright (c) 2019 Intel Corporation
-
  Licensed under the Apache License, Version 2.0 (the "License");
  you may not use this file except in compliance with the License.
  You may obtain a copy of the License at
-
       http://www.apache.org/licenses/LICENSE-2.0
-
  Unless required by applicable law or agreed to in writing, software
  distributed under the License is distributed on an "AS IS" BASIS,
  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,12 +21,12 @@ import time
 import logging as log
 import numpy as np
 import io
-from openvino.inference_engine import IENetwork, IEPlugin
+from openvino.inference_engine import IENetwork, IECore
 from pathlib import Path
 sys.path.insert(0, str(Path().resolve().parent.parent.parent))
 from demoTools.demoutils import *
 from IPython.display import display
-CODEC = cv2.VideoWriter_fourcc(*"avc1")
+CODEC = cv2.VideoWriter_fourcc(*"MPEG")
 
 def build_argparser():
     parser = ArgumentParser()
@@ -95,21 +92,23 @@ def main():
 
     # Plugin initialization for specified device and load extensions library if specified
     log.info("Initializing plugin for {} device...".format(args.device))
-    plugin = IEPlugin(device=args.device, plugin_dirs=args.plugin_dir)
+    #plugin = IEPlugin(device=args.device, plugin_dirs=args.plugin_dir)
+    ie=IECore()
     if args.cpu_extension and 'CPU' in args.device:
         log.info("Loading plugins for {} device...".format(args.device))
-        plugin.add_cpu_extension(args.cpu_extension)
+        #plugin.add_cpu_extension(args.cpu_extension)
+        ie.add_extension(args.cpu_extension,args.device)
 
     # Read IR
     log.info("Reading IR...")
     net = IENetwork(model=model_xml, weights=model_bin)
 
     if args.device == "CPU":
-        supported_layers = plugin.get_supported_layers(net)
+        supported_layers = ie.query_network(net,args.device)
         not_supported_layers = [l for l in net.layers.keys() if l not in supported_layers]
         if len(not_supported_layers) != 0:
             log.error("Following layers are not supported by the plugin for specified device {}:\n {}".
-                      format(plugin.device, ', '.join(not_supported_layers)))
+                      format(args.device, ', '.join(not_supported_layers)))
             log.error("Please try to specify cpu extensions library path in sample's command line parameters using -l "
                       "or --cpu_extension command line argument")
             sys.exit(1)
@@ -128,7 +127,7 @@ def main():
         out_file_name = os.path.splitext(os.path.basename(args.input))[0]
 
     log.info("Loading IR to the plugin...")
-    exec_net = plugin.load(network=net, num_requests=args.number_infer_requests)
+    exec_net = ie.load_network(network=net, num_requests=args.number_infer_requests,device_name=args.device)
  
 
     log.info("Starting inference in async mode, {} requests in parallel...".format(args.number_infer_requests))
@@ -234,9 +233,8 @@ def main():
     finally:
         log.info("Processing done...")
         del exec_net
-        del plugin
+        del ie
 
 
 if __name__ == '__main__':
     sys.exit(main() or 0)
-

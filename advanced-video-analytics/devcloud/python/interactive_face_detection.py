@@ -25,7 +25,7 @@ import numpy as np
 import math
 import logging as log
 from PIL import Image
-from openvino.inference_engine import IENetwork, IEPlugin
+from openvino.inference_engine import IENetwork, IECore
 CV_PI=3.1415926535897932384626433832795
 from pathlib import Path
 sys.path.insert(0, str(Path().resolve().parent.parent))
@@ -155,16 +155,19 @@ def load_model(feature,model_xml,device,plugin_dirs,input_key_length,output_key_
     
     
     log.info("Initializing plugin for {} device...".format(device))
-    plugin = IEPlugin(device, plugin_dirs)
+    #plugin = IEPlugin(device, plugin_dirs)
+    ie = IECore()
     log.info("Loading network files for {}".format(feature))
     if cpu_extension and 'CPU' in device:
-        plugin.add_cpu_extension(cpu_extension)
+        #plugin.add_cpu_extension(cpu_extension)
+        ie.add_extension(cpu_extension, device)
     else:
-        plugin.set_config({"PERF_COUNT":"YES"})
+        ie.set_config({"PERF_COUNT":"YES"},device)
     net = IENetwork(model=model_xml, weights=model_bin)
 
-    if plugin.device == "CPU":
-        supported_layers = plugin.get_supported_layers(net)
+    if "CPU" in device :
+        #supported_layers = plugin.get_supported_layers(net)
+        supported_layers =  ie.query_network(net, "CPU")
         not_supported_layers = [l for l in net.layers.keys() if l not in supported_layers]
         if len(not_supported_layers) != 0:
             log.error("Following layers are not supported by the plugin for specified device {}:\n {}".
@@ -177,7 +180,7 @@ def load_model(feature,model_xml,device,plugin_dirs,input_key_length,output_key_
     assert len(net.inputs.keys()) == input_key_length, "Demo supports only single input topologies"
     log.info("Checking {} network outputs".format(feature))
     assert len(net.outputs) == output_key_length, "Demo supports only single output topologies"
-    return plugin,net
+    return ie,net
 
 
 def main():
@@ -191,107 +194,108 @@ def main():
     infer_times = collections.deque()
 
     #Make sure only one IEPlugin was created for one type of device
-    plugin,net = load_model("Face Detection",args.model,args.device,args.plugin_dir,1,1,args.cpu_extension)    
+    ie,net = load_model("Face Detection",args.model,args.device,args.plugin_dir,1,1,args.cpu_extension)    
 
     if args.model and args.ag_model:
-        plugin_ag,ag_net = load_model("Age/Gender Recognition",args.ag_model,args.device_ag,args.plugin_dir,1,2,args.cpu_extension)
+        ie_ag,ag_net = load_model("Age/Gender Recognition",args.ag_model,args.device_ag,args.plugin_dir,1,2,args.cpu_extension)
         if args.device == args.device_ag:
-            plugin_ag = plugin
+            ie_ag = ie
             if args.model and args.hp_model:
-                plugin_hp,hp_net=load_model("Head Pose Estimation",args.hp_model,args.device_hp,args.plugin_dir,1,3,args.cpu_extension)
+                ie_hp,hp_net=load_model("Head Pose Estimation",args.hp_model,args.device_hp,args.plugin_dir,1,3,args.cpu_extension)
                 if args.device == args.device_hp:                    
-                    plugin_hp = plugin
+                    ie_hp = ie
                     if args.model and args.em_model:
-                        plugin_em,em_net=load_model("Emotions Recognition",args.em_model,args.device_em,args.plugin_dir,1,1,args.cpu_extension)
+                        ie_em,em_net=load_model("Emotions Recognition",args.em_model,args.device_em,args.plugin_dir,1,1,args.cpu_extension)
                         if args.device == args.device_em:                    
-                            plugin_em = plugin
+                            ie_em = ie
                             if args.model and args.lm_model:
-                                plugin_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)
+                                ie_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)
                                 if args.device == args.device_lm:                    
-                                    plugin_lm = plugin
+                                    ie_lm = ie
 
                         else :
                             if args.model and args.lm_model:
-                                plugin_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)
+                                ie_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)
                                 if args.device_em == args.device_lm:
-                                    plugin_lm = plugin_em
+                                    ie_lm = ie_em
                                 elif args.device_hp == args.device_lm:
-                                    plugin_lm = plugin_hp
+                                    ie_lm = ie_hp
                                 elif args.device_ag == args.device_lm:
-                                    plugin_lm = plugin_ag
+                                    ie_lm = ie_ag
                                 elif args.device == args.device_lm:
-                                    plugin_lm = plugin
+                                    ie_lm = ie
 
                 else :
                     if args.model and args.em_model:
-                        plugin_em,em_net=load_model("Emotions Recognition",args.em_model,args.device_em,args.plugin_dir,1,1,args.cpu_extension)
+                        ie_em,em_net=load_model("Emotions Recognition",args.em_model,args.device_em,args.plugin_dir,1,1,args.cpu_extension)
                         if args.device_hp == args.device_em:
-                            plugin_em = plugin_hp
+                            ie_em = ie_hp
                         elif args.device_ag == args.device_em:
-                            plugin_em = plugin_ag
+                            ie_em = ie_ag
                         elif args.device == args.device_em:
-                            plugin_em = plugin
+                            ie_em = ie
 
                     if args.model and args.lm_model:
-                        plugin_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)                    
+                        ie_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)                    
                         if args.device_em == args.device_lm:
-                            plugin_lm = plugin_em
+                            ie_lm = ie_em
                         elif args.device_hp == args.device_lm:
-                            plugin_lm = plugin_hp
+                            ie_lm = ie_hp
                         elif args.device_ag == args.device_lm:
-                            plugin_lm = plugin_ag
+                            ie_lm = ie_ag
                         elif args.device == args.device_lm:
-                            plugin_lm = plugin
+                            ie_lm = ie
                     
         else :
             if args.model and args.hp_model:
-                plugin_hp,hp_net=load_model("Head Pose Estimation",args.hp_model,args.device_hp,args.plugin_dir,1,3,args.cpu_extension)
+                ie_hp,hp_net=load_model("Head Pose Estimation",args.hp_model,args.device_hp,args.plugin_dir,1,3,args.cpu_extension)
                 if args.device_ag == args.device_hp:
-                    plugin_hp = plugin_ag
+                    ie_hp = ie_ag
                 elif args.device == args.device_hp:
-                    plugin_hp = plugin
+                    ie_hp = ie
             if args.model and args.em_model:
-                plugin_em,em_net=load_model("Emotions Recognition",args.em_model,args.device_em,args.plugin_dir,1,1,args.cpu_extension)
+                ie_em,em_net=load_model("Emotions Recognition",args.em_model,args.device_em,args.plugin_dir,1,1,args.cpu_extension)
             
                 if args.device_hp == args.device_em:
-                    plugin_em = plugin_hp
+                    ie_em = ie_hp
                 elif args.device_ag == args.device_em:
-                    plugin_em = plugin_ag
+                    ie_em = ie_ag
                 elif args.device == args.device_em:
-                    plugin_em = plugin
+                    ie_em = ie
             if args.model and args.lm_model:
 
-                plugin_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)
+                ie_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)
                 if args.device_em == args.device_lm:
-                    plugin_lm = plugin_em
+                    ie_lm = ie_em
                 elif args.device_hp == args.device_lm:
-                    plugin_lm = plugin_hp
+                    ie_lm = ie_hp
                 elif args.device_ag == args.device_lm:
-                    plugin_lm = plugin_ag
+                    ie_lm = ie_ag
                 elif args.device == args.device_lm:
-                    plugin_lm = plugin
+                    ie_lm = ie
                                                                                                   
     else : 
 
 
         if args.model and args.hp_model:
-            plugin_hp,hp_net=load_model("Head Pose Estimation",args.hp_model,args.device_hp,args.plugin_dir,1,3,args.cpu_extension)    
+            ie_hp,hp_net=load_model("Head Pose Estimation",args.hp_model,args.device_hp,args.plugin_dir,1,3,args.cpu_extension)    
             if args.device == args.device_hp:                    
-                plugin_hp = plugin        
+                ie_hp = ie        
         if args.model and args.em_model:
-            plugin_em,em_net=load_model("Emotions Recognition",args.em_model,args.device_em,args.plugin_dir,1,1,args.cpu_extension)
+            ie_em,em_net=load_model("Emotions Recognition",args.em_model,args.device_em,args.plugin_dir,1,1,args.cpu_extension)
             if args.device == args.device_em:
-                plugin_em = plugin
+                ie_em = ie
         if args.model and args.lm_model:
-            plugin_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)
+            ie_lm,lm_net=load_model("Facial Landmarks Estimation",args.lm_model,args.device_lm,args.plugin_dir,1,1,args.cpu_extension)
             if args.device == args.device_lm:
-                plugin_lm = plugin
+                ie_lm = ie
         
        
     # Face detection
     input_blob = next(iter(net.inputs))
     out_blob = next(iter(net.outputs))
-    exec_net = plugin.load(network=net)
+    #exec_net = plugin.load(network=net)
+    exec_net = ie.load_network(network=net,  device_name=args.device)
     n, c, h, w = net.inputs[input_blob].shape
     del net
     infer_file = os.path.join(args.output_dir, 'i_progress.txt')
@@ -301,7 +305,7 @@ def main():
        age_enabled =True 
        age_input_blob=next(iter(ag_net.inputs))
        age_out_blob=next(iter(ag_net.outputs))
-       age_exec_net=plugin_ag.load(network=ag_net, num_requests=2)
+       age_exec_net=ie_ag.load_network(network=ag_net,  device_name=args.device_ag)
        ag_n, ag_c, ag_h, ag_w = ag_net.inputs[input_blob].shape
        del ag_net
        
@@ -310,7 +314,7 @@ def main():
         headPose_enabled = True 
         hp_input_blob=next(iter(hp_net.inputs))
         hp_out_blob=next(iter(hp_net.outputs))
-        hp_exec_net=plugin_hp.load(network=hp_net, num_requests=2)
+        hp_exec_net=ie_hp.load_network(network=hp_net, num_requests=2,device_name=args.device_hp)
         hp_n, hp_c, hp_h, hp_w = hp_net.inputs[input_blob].shape
         del hp_net
 
@@ -319,7 +323,7 @@ def main():
         emotions_enabled = True
         em_input_blob=next(iter(em_net.inputs))
         em_out_blob=next(iter(em_net.outputs))
-        em_exec_net=plugin_em.load(network=em_net, num_requests=2)
+        em_exec_net=ie_em.load_network(network=em_net,device_name=args.device_em)
         em_n, em_c, em_h, em_w = em_net.inputs[input_blob].shape
         del em_net
 
@@ -328,7 +332,7 @@ def main():
         landmarks_enabled = True
         lm_input_blob=next(iter(lm_net.inputs))
         lm_out_blob=next(iter(lm_net.outputs))
-        lm_exec_net=plugin_lm.load(network=lm_net, num_requests=2)
+        lm_exec_net=ie_lm.load_network(network=lm_net, num_requests=2,device_name=args.device_lm)
         lm_n, lm_c, lm_h, lm_w = lm_net.inputs[input_blob].shape
         del lm_net
 
@@ -582,7 +586,7 @@ def main():
         f.write('{} \n'.format(framesCounter))
     
     del exec_net
-    del plugin
+    del ie
     log.info("Execution successful")
 
 if __name__ == '__main__':
