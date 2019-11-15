@@ -157,7 +157,7 @@ def main():
     initial_h = cap.get(4)
     interact_counter = cv2.VideoWriter(os.path.join(args.output_dir, "output.mp4"),CODEC, fps, (int(initial_w), int(initial_h)), True)
     CHUNKSIZE = n*c*w*h
-    print("hello")
+   
     id_ = 0
     with open(processed_vid, 'w+b') as f:
         time_start = time.time()
@@ -173,7 +173,7 @@ def main():
             id_ += 1
             if id_%10 == 0: 
                 progressUpdate(pre_infer_file, time.time()-time_start, id_, video_len) 
-    print("hello 2")
+    
     if args.labels:
         with open(args.labels, 'r') as f:
             labels_map = [x.strip() for x in f]
@@ -219,14 +219,14 @@ def main():
                 if previous_inference >= args.number_infer_requests:
                     previous_inference = 0
                 interact_counter.write(in_frame)    
-        print("Hello 3")
+        
        # End while loop
         total_time = time.time() - infer_time_start
         with open(os.path.join(args.output_dir, 'stats.txt'), 'w') as f:
                 f.write('{:.3g} \n'.format(total_time))
                 f.write('{} \n'.format(frame_count))
        
-        print("Hello 4")     
+             
         cap.release()
         result_file.close()
 
